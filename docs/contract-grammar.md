@@ -812,6 +812,7 @@ launch        = "size" NUMBER "x" NUMBER NL          (* written 1200x800 *)
               | "before" "data" NL                   (* the first step does not wait for data *)
               | "prefer" IDENT { "." IDENT } ( IDENT | STRING ) NL
                                                      (* media feature, page fact, or permission.<module>; before observations *)
+              | "answer" "source" IDENT "with" json NL (* what a source answers under verify *)
               | "fail" "fetch" STRING [ "times" NUMBER ] NL ; (* armed before the first data load *)
 step          = "tap" "midi" STRING ( HEX { HEX } | "clock" NUMBER NUMBER ) NL
                                                      (* bytes into an input; or clock ticks: bpm, ms *)
@@ -846,6 +847,7 @@ step          = "tap" "midi" STRING ( HEX { HEX } | "clock" NUMBER NUMBER ) NL
               | "reload" NL
               | "fail" "fetch" STRING [ "times" NUMBER ] NL (* later fetches whose URL starts with it fail *)
               | "pass" "fetch" STRING NL             (* it stops failing *)
+              | "answer" "source" IDENT "with" json NL (* the source answers anew; its readers ask again *)
               | "drop" "stream" STRING NL           (* ends open streams whose URL starts with it *)
               | "prefer" IDENT STRING NL             (* quoted media preference or root-font-size *)
               | "request" METHOD STRING [ json ] [ "as" ( IDENT | STRING ) ] [ "expect" NUMBER ] NL
@@ -979,8 +981,10 @@ frame         = "only" "writes" { IDENT } NL          (* no other root slot chan
 `after`. The braces in the EBNF mean repetition, not written braces. A read names a
 whole root state or derive by its bare identifier; fields and indices are stage 2.
 Before any script runs, verify rejects a derive whose body, dependencies or called
-functions reach a resource, mutation status, clock or geometry read. A mutation's
-result slot is a state and may be named.
+functions reach a mutation status, clock or geometry read, or, outside `always`, a
+resource. An `always` line checks each printed configuration, where the runner and
+Lean print the same oracle answer; an `after` pair could see a resource change on a
+step that commits nothing. A mutation's result slot is a state and may be named.
 
 `always` checks every printed configuration, including boot. `stays v` means that a
 previous observation equal to `v` must remain `v`. `after "action"` reads the value
@@ -1123,6 +1127,24 @@ The real source parses the response, so an HTTP error status is a response,
 where `fail fetch` is a rejected connection. These fixtures cover buffered HTTP
 requests, including a worker's; streams, long polls, redirects, `exactBodyTo`,
 delays and response files are not supported.
+
+`answer source pairing with {"phase": "code", "code": "123456"}` chooses what the
+source `pairing` answers under `contract verify`, whose runner otherwise answers a
+value of the source's shape drawn from the seed. The JSON is decoded against the
+source's declared result: a record may leave fields out, which keep the seed's
+answer, and a field it names must hold a value of its type (an enum's member, a
+number, a list). An unknown source or field, or a value that does not fit, fails
+verify before any script runs, naming the test. Leading a test or the file, the
+line answers from boot; a test's own line replaces the file's for that source.
+Later, it is a step: the source answers anew, whatever its arguments, and every
+resource reading it is asked again in one commit, as when a host announces that a
+topic changed. A later line's record fields replace those the source's earlier
+lines named, so it names only what changed. So a test can walk a host's phases (`idle`, then `code`, then
+`done`) and check what each shows. A walk that replays the test's prefix replays
+its answers. Lean takes the oracle as one table for the run, so it confirms a
+script only up to its first later `answer source`, as does `--js`. A device runs
+the app's own data module, so `agent --test` skips a test with such a line,
+saying so.
 
 `request POST "/polls/1/votes" {"option": 2} as bob`
 (LLP 1116.006 D8) is the driver, not the app, writing through the app's server as

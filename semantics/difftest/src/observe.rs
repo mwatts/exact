@@ -540,5 +540,16 @@ pub(crate) fn apply(
             let a = r.land_then();
             (a.error.map_or(Ok(()), Err), a.receipts.len())
         }
+        Event::Answer(source, json) => {
+            if let Err(why) = r.data().answer(source, json) {
+                let error = exact_runner::DataError::Interface(why);
+                let resource = source.clone();
+                return (Err(exact_runner::RunnerError::Data { resource, error }), 0);
+            }
+            match r.changed(&crate::oracle::changed_topic(source)) {
+                Ok(receipt) => (Ok(()), usize::from(receipt.is_some())),
+                Err(e) => (Err(e), 0),
+            }
+        }
     }
 }

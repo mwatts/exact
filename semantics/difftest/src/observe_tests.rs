@@ -509,3 +509,103 @@ fn a_polled_module_answer_that_moves_is_outside() {
         matches!(crate::compare(rust, lean), crate::Verdict::Unsupported(why) if why.starts_with(observe::MODULE_MOVED))
     );
 }
+
+const PAIRING: &str = r#"shape Pairing
+  phase: enum<"idle", "code", "done">
+  code: string
+  peer: string
+component App
+  resource pairing = pairing() as shape Pairing else empty(phase="idle", code="", peer="")
+  derive phase = pairing.phase
+  state taps = 0
+  action press
+    taps = taps + 1
+  view
+    column
+      button "Press" testId="press" press=press
+      text pairing.peer testId="peer"
+      if pairing.phase == "code"
+        text pairing.code testId="code"
+      if pairing.phase == "done"
+        text "Paired" testId="done"
+"#;
+
+/// A test chooses what a source answers, before boot and between steps: each
+/// later line asks the resource again and changes only the fields it names,
+/// and fields no line names keep the oracle's answer.
+#[test]
+fn a_test_chooses_a_sources_answers_and_changes_them_between_steps() {
+    let source = format!(
+        r#"{PAIRING}test "phases"
+  answer source pairing with {{"phase": "idle"}}
+  expect state phase == "idle"
+  expect tree missing "code"
+  answer source pairing with {{"phase": "code", "code": "123456"}}
+  expect state phase == "code"
+  expect text "code" == "123456"
+  tap "press"
+  expect text "code" == "123456"
+  answer source pairing with {{"phase": "done"}}
+  expect tree missing "code"
+  expect tree has "done"
+  answer source pairing with {{"phase": "code"}}
+  expect text "code" == "123456"
+"#
+    );
+    let s = script::scripted("answers", &source, None)
+        .unwrap()
+        .remove(0);
+    assert!(s.delivery.stopped.is_none(), "{:?}", s.delivery.stopped);
+    assert_eq!(
+        s.case.answers,
+        [("pairing".into(), r#"{"phase":"idle"}"#.into())]
+    );
+    let plan = compile(&s.case).unwrap();
+    let (lines, _) = observe::run(
+        plan.clone(),
+        Oracle::for_case(&plan, &s.case),
+        &s.case.events,
+    );
+    crate::expectations_on(&s, &plan, &lines).unwrap();
+    let peers: std::collections::BTreeSet<&String> = lines
+        .iter()
+        .filter(|l| l.starts_with("view \"peer\" "))
+        .collect();
+    assert_eq!(
+        peers.len(),
+        1,
+        "an unnamed field keeps one answer: {peers:?}"
+    );
+    assert!(
+        lines.contains(&r#"== answer source pairing with {"phase":"done"}"#.to_string()),
+        "{lines:?}"
+    );
+    assert_eq!(
+        script::before_answer(&s.case.events).len(),
+        0,
+        "Lean and the JS target stop before the first change"
+    );
+}
+
+#[test]
+fn an_answer_the_source_cannot_give_is_refused_by_name() {
+    let plan = contract::compile(PAIRING).unwrap();
+    let check = |source: &str, json: &str| crate::oracle::check_answer(&plan, source, json);
+    assert_eq!(check("pairing", r#"{"phase": "code"}"#), Ok(()));
+    assert_eq!(
+        check("pairng", "{}").unwrap_err(),
+        "the app has no source `pairng`"
+    );
+    assert_eq!(
+        check("pairing", r#"{"stage": "code"}"#).unwrap_err(),
+        "`Pairing` has no field `stage`"
+    );
+    assert_eq!(
+        check("pairing", r#"{"phase": "lost"}"#).unwrap_err(),
+        r#"phase: "lost" is not a member of "idle", "code", "done""#
+    );
+    assert_eq!(
+        check("pairing", r#"{"code": 7}"#).unwrap_err(),
+        "code: 7 is not a string"
+    );
+}

@@ -7,7 +7,7 @@
 use crate::observe::value as canonical;
 use crate::rng::Rng;
 use exact_plan::{Plan, TypeKind, TypesId, Value};
-use exact_runner::{DataError, DataSource};
+use exact_runner::{Answer, DataError, DataSource, Store};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -47,6 +47,19 @@ pub struct Oracle {
     /// The app's grant lines, which admit a native module's calls; none
     /// unless a test sets them.
     pub grants: String,
+    /// What a test's `answer source` lines set, by source: the answer to
+    /// every call of it, a record's unnamed fields the seed's.
+    answers: Rc<RefCell<Vec<(String, serde_json::Value)>>>,
+    /// The sources a test's later `answer source` lines change. Their
+    /// answers watch [`changed_topic`], which the oracle announces as a host
+    /// announces a change ([`exact_runner::Runner::changed`]).
+    changing: Rc<Vec<String>>,
+}
+
+/// The topic every answer of `source` watches when a test changes what it
+/// answers. The space keeps it apart from any topic an app's data names.
+pub fn changed_topic(source: &str) -> String {
+    format!("answer source {source}")
 }
 
 impl Oracle {
@@ -73,6 +86,8 @@ impl Oracle {
             prerendered: false,
             launch: Default::default(),
             grants: String::new(),
+            answers: Rc::default(),
+            changing: Rc::default(),
         }
     }
 
@@ -85,6 +100,19 @@ impl Oracle {
         );
         oracle.prerendered = case.prerendered;
         oracle.launch = case.launch.clone();
+        for (source, json) in &case.answers {
+            // `crate::script::test_case` refused an answer that does not fit.
+            let _ = oracle.answer(source, json);
+        }
+        let mut changing = Vec::new();
+        for e in &case.events {
+            if let crate::script::Event::Answer(source, _) = e {
+                if !changing.contains(source) {
+                    changing.push(source.clone());
+                }
+            }
+        }
+        oracle.changing = Rc::new(changing);
         if case.stored {
             oracle.with_store()
         } else {
@@ -139,7 +167,31 @@ impl Oracle {
             prerendered: self.prerendered,
             launch: self.launch.clone(),
             grants: self.grants.clone(),
+            answers: self.answers.clone(),
+            changing: self.changing.clone(),
         }
+    }
+
+    /// From now on `source` answers `json`, whatever its arguments: a
+    /// test's `answer source` line. A record's fields replace those of the
+    /// line before for the source, so a later line names what changed. The
+    /// calls it answered before leave the transcript, which holds what the
+    /// source answers now.
+    pub fn answer(&self, source: &str, json: &str) -> Result<(), String> {
+        let mut json = parse_answer(&self.plan, source, json)?;
+        let mut answers = self.answers.borrow_mut();
+        if let Some(i) = answers.iter().position(|(s, _)| s == source) {
+            let (_, before) = answers.remove(i);
+            if let (serde_json::Value::Object(mut fields), serde_json::Value::Object(named)) =
+                (before, &json)
+            {
+                fields.extend(named.clone());
+                json = serde_json::Value::Object(fields);
+            }
+        }
+        answers.push((source.to_string(), json));
+        self.transcript.borrow_mut().retain(|c| c.source != source);
+        Ok(())
     }
 
     /// Sources whose boot answers bypassed the oracle and became host facts.
@@ -314,6 +366,18 @@ impl DataSource for Oracle {
         &self.grants
     }
 
+    fn answer(
+        &mut self,
+        store: &mut Store,
+        source: &str,
+        args: &[Value],
+    ) -> Result<Answer, DataError> {
+        if self.changing.iter().any(|s| s == source) {
+            store.observe_topic(&changed_topic(source));
+        }
+        self.query(source, args).map(Answer::Now)
+    }
+
     fn query(&mut self, source: &str, args: &[Value]) -> Result<Value, DataError> {
         let Some((_, params, result)) = self.signatures.iter().find(|(n, _, _)| n == source) else {
             return Err(DataError::UnknownSource(source.into()));
@@ -331,13 +395,126 @@ impl DataSource for Oracle {
         }
         let key: Vec<String> = args.iter().map(canonical).collect();
         let mut rng = Rng::new(hash(self.seed, &format!("{source}({})", key.join(","))));
-        let answer = generate(&self.plan, result, &mut rng, 0);
+        let mut answer = generate(&self.plan, result, &mut rng, 0);
+        if let Some((_, json)) = self.answers.borrow().iter().find(|(s, _)| s == source) {
+            answer = over(&self.plan, result, json, Some(&answer), &mut rng)
+                .map_err(|e| DataError::Interface(format!("answer source {source}: {e}")))?;
+        }
         self.transcript.borrow_mut().push(Call {
             source: source.to_string(),
             args: params.iter().copied().zip(args.iter().cloned()).collect(),
             answer: (result, answer.clone()),
         });
         Ok(answer)
+    }
+}
+
+/// Whether `json` is an answer `source` can give: a test's `answer source`
+/// line, checked against the app before any script runs.
+pub fn check_answer(plan: &Plan, source: &str, json: &str) -> Result<(), String> {
+    parse_answer(plan, source, json).map(drop)
+}
+
+fn parse_answer(plan: &Plan, source: &str, json: &str) -> Result<serde_json::Value, String> {
+    let Some(row) = plan.sources.iter().find(|s| plan.str(s.name) == source) else {
+        return Err(format!("the app has no source `{source}`"));
+    };
+    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    over(plan, row.ty, &value, None, &mut Rng::new(0))?;
+    Ok(value)
+}
+
+/// `json` as a value of type `ty`. What it leaves out of a record is
+/// `base`'s, else generated: a test names only the fields it is about.
+fn over(
+    plan: &Plan,
+    ty: TypesId,
+    json: &serde_json::Value,
+    base: Option<&Value>,
+    rng: &mut Rng,
+) -> Result<Value, String> {
+    use serde_json::Value as J;
+    let row = plan.type_(ty);
+    let value = match (row.kind, json) {
+        (TypeKind::Number, J::Number(n)) => Value::Number(n.as_f64().unwrap_or(f64::NAN)),
+        (TypeKind::Bool, J::Bool(b)) => Value::Bool(*b),
+        (TypeKind::String, J::String(s)) => Value::str(s),
+        (TypeKind::Unit, J::Null) => Value::Unit,
+        (TypeKind::Option, J::Null) => Value::Option(None),
+        (TypeKind::Option, json) => {
+            let elem = row.elem.ok_or("an option of nothing")?;
+            let inner = match base {
+                Some(Value::Option(Some(v))) => Some(v.as_ref()),
+                _ => None,
+            };
+            Value::some(over(plan, elem, json, inner, rng)?)
+        }
+        (TypeKind::List, J::Array(items)) => {
+            let elem = row.elem.ok_or("a list of nothing")?;
+            let kept = |i: usize| match base {
+                Some(Value::List(xs)) => xs.get(i),
+                _ => None,
+            };
+            Value::list(
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| over(plan, elem, item, kept(i), rng))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        }
+        (TypeKind::Record, J::Object(fields)) => {
+            let names: Vec<&str> = row
+                .fields
+                .iter()
+                .map(|f| plan.str(plan.field(f).name))
+                .collect();
+            if let Some(unknown) = fields.keys().find(|k| !names.contains(&k.as_str())) {
+                return Err(format!("`{}` has no field `{unknown}`", plan.str(row.name)));
+            }
+            let kept = |i: usize| match base {
+                Some(Value::Record(xs)) => xs.get(i),
+                _ => None,
+            };
+            Value::record(
+                row.fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| {
+                        let field = plan.field(f);
+                        match fields.get(plan.str(field.name)) {
+                            Some(json) => over(plan, field.ty, json, kept(i), rng)
+                                .map_err(|e| format!("{}: {e}", plan.str(field.name))),
+                            None => Ok(kept(i)
+                                .cloned()
+                                .unwrap_or_else(|| generate(plan, field.ty, rng, 1))),
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        }
+        (_, json) => return Err(format!("{json} is not a {}", describe(plan, ty))),
+    };
+    if !value.conforms(plan, ty) {
+        return Err(format!("{json} is not a {}", describe(plan, ty)));
+    }
+    Ok(value)
+}
+
+/// A type as an answer's error names it.
+fn describe(plan: &Plan, ty: TypesId) -> String {
+    let row = plan.type_(ty);
+    match row.kind {
+        TypeKind::String if !row.fields.is_empty() => {
+            let members: Vec<String> = row
+                .fields
+                .iter()
+                .map(|f| format!("{:?}", plan.str(plan.field(f).name)))
+                .collect();
+            format!("member of {}", members.join(", "))
+        }
+        TypeKind::Record => format!("`{}` record", plan.str(row.name)),
+        kind => format!("{kind:?}").to_lowercase(),
     }
 }
 

@@ -17,6 +17,7 @@ fn make_case(source: &str) -> Case {
         stored: false,
         prerendered: false,
         launch: Default::default(),
+        answers: Vec::new(),
     }
 }
 

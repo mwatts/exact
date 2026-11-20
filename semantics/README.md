@@ -331,7 +331,9 @@ most 40 chosen primitive events each, plus automatic clock advances. `--walks`,
 search; the seed defaults to the app's path. Half the walks boot fresh; the others
 replay delivered test prefixes in turn before appending events. Each choice reads
 the live rendered controls. Inputs land before the next choice. Typed values come
-from that field's authored tests, then source literals, then the generator. Every
+from that field's authored tests, then source literals, then the generator. A key
+is pressed at a box whose `key` or `keycapture` handler names an action: one of
+that box's authored keys, then a key value (one character, or a named key such as `Escape` or `F2`) the action holds. Every
 script also runs from a seeded store when the app persists state, with the same
 oracle answers as its empty-store run.
 
@@ -374,7 +376,11 @@ why. A property failure or type refusal fails verification; app refusals are fin
 the observation format. Leading fixed `epoch` and `time-zone` lines set the
 runner's launch facts, using Bun's Date and Intl APIs for the date and offset;
 Lean receives the resulting host facts in its oracle. `epoch now` and other
-launch settings remain undelivered. A block runs up to its first
+launch settings remain undelivered. `type "id" key "Name"` runs the
+`keycapture` and `key` handlers at and above the target as the web routes a
+keydown (`Runner::key_at`). The key's default is the host's, so a key at a
+field, a control or an element with `press`, and Tab anywhere, stop the block
+there. Lean and `--js` take a script up to its first key. A block runs up to its first
 undeliverable step, with its location, kind and reason printed. Only a block
 that stops at its first step is `SKIP`. Expectations before the stop still
 run. The summary counts whole, partial and skipped blocks.

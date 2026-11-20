@@ -47,6 +47,9 @@ pub struct Oracle {
     /// The app's grant lines, which admit a native module's calls; none
     /// unless a test sets them.
     pub grants: String,
+    /// Commands taken from the runner while a key was routed, kept for the
+    /// observation to print (`crate::observe::apply`).
+    pub(crate) commands: Vec<exact_runner::Command>,
 }
 
 impl Oracle {
@@ -73,6 +76,7 @@ impl Oracle {
             prerendered: false,
             launch: Default::default(),
             grants: String::new(),
+            commands: Vec::new(),
         }
     }
 
@@ -139,6 +143,7 @@ impl Oracle {
             prerendered: self.prerendered,
             launch: self.launch.clone(),
             grants: self.grants.clone(),
+            commands: Vec::new(),
         }
     }
 

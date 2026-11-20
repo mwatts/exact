@@ -124,6 +124,8 @@ fn event(e: &Event) -> String {
         Event::Type(t, s) => format!("{{\"type\":[{},{}]}}", string(t), string(s)),
         Event::Clock(ms) | Event::TestClock(ms) => format!("{{\"clock\":{}}}", number(*ms)),
         Event::Land | Event::InputLand => "{\"land\":true}".into(),
+        // `prepare` drives the JS target only up to a script's first key.
+        Event::Key(..) => unreachable!("a key is not a JS target event"),
     }
 }
 
@@ -158,7 +160,8 @@ fn prepare(case: &Case, dir: &Path, index: usize) -> Result<Ready, JsVerdict> {
         ));
     }
     let plan = compile(case).map_err(JsVerdict::Refused)?;
-    let (rust, data) = observe::run(plan.clone(), Oracle::for_case(&plan, case), &case.events);
+    let events = crate::script::modelled(&case.events);
+    let (rust, data) = observe::run(plan.clone(), Oracle::for_case(&plan, case), events);
     let data = data.expect("the oracle comes back");
     let file = match &case.path {
         Some(p) if std::fs::read_to_string(p).ok().as_deref() == Some(case.source.as_str()) => {
@@ -191,7 +194,7 @@ fn prepare(case: &Case, dir: &Path, index: usize) -> Result<Ready, JsVerdict> {
         .iter()
         .map(|(name, _, v)| format!("{}:{}", string(name), value(v)))
         .collect();
-    let events: Vec<String> = case.events.iter().map(event).collect();
+    let events: Vec<String> = events.iter().map(event).collect();
     // The device's store at launch, and the persisted states whose `store`
     // lines follow the slots (LLP 1116 D5).
     let stored: Vec<String> = data

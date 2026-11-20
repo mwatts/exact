@@ -115,7 +115,7 @@ pub fn run(file: &Path, options: &Options) -> Result<bool, String> {
         "undeliverable parser step kinds: {}",
         crate::script::undeliverable_kinds()
     );
-    println!("delivered forms: tap press without modifiers; type replacement; clock +N, data, settle, until state (fields and indices included); leading size (no layout); expect (host-only reads omitted)");
+    println!("delivered forms: tap press without modifiers; type replacement; type key press at a box or text without press (its handlers; no default); clock +N, data, settle, until state (fields and indices included); leading size (no layout); expect (host-only reads omitted)");
     let mut delivery = crate::receipt::Delivery::default();
     let mut located = Vec::new();
     for (test_file, tests) in authored {
@@ -223,7 +223,13 @@ pub fn run(file: &Path, options: &Options) -> Result<bool, String> {
             let record = |driver: &crate::observe::Driver, rendered: &mut BTreeSet<String>| {
                 if is_walk {
                     for control in driver.controls() {
-                        rendered.extend(control.press.into_iter().chain(control.input));
+                        rendered.extend(
+                            control
+                                .press
+                                .into_iter()
+                                .chain(control.input)
+                                .chain(control.key),
+                        );
                     }
                 }
             };
@@ -779,7 +785,9 @@ fn locate(
         } else {
             step
         };
-        if let Event::Tap(id) | Event::Type(id, _) = &case.events[input_step - 1] {
+        if let Event::Tap(id) | Event::Type(id, _) | Event::Key(id, _) =
+            &case.events[input_step - 1]
+        {
             if let Some(where_) = site(&case.events[..input_step - 1], id) {
                 out.push_str(&format!("  the element {id:?} is {where_}\n"));
             }

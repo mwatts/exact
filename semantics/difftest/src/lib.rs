@@ -124,7 +124,7 @@ pub fn prepare(case: &Case, index: usize) -> Result<Prepared, Verdict> {
     }
     .map_err(|e| Verdict::Emit(e.to_string()))?;
     let oracle = oracle::Oracle::for_case(&plan, case);
-    let events = script::before_answer(&case.events);
+    let events = script::modelled(&case.events);
     let (rust, data) = observe::run(plan, oracle, events);
     let oracle = data.map_or_else(String::new, |o| o.text());
     Ok(Prepared {

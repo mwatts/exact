@@ -54,6 +54,9 @@ pub struct Oracle {
     /// answers watch [`changed_topic`], which the oracle announces as a host
     /// announces a change ([`exact_runner::Runner::changed`]).
     changing: Rc<Vec<String>>,
+    /// Commands taken from the runner while a key was routed, kept for the
+    /// observation to print (`crate::observe::apply`).
+    pub(crate) commands: Vec<exact_runner::Command>,
 }
 
 /// The topic every answer of `source` watches when a test changes what it
@@ -88,6 +91,7 @@ impl Oracle {
             grants: String::new(),
             answers: Rc::default(),
             changing: Rc::default(),
+            commands: Vec::new(),
         }
     }
 
@@ -169,6 +173,7 @@ impl Oracle {
             grants: self.grants.clone(),
             answers: self.answers.clone(),
             changing: self.changing.clone(),
+            commands: Vec::new(),
         }
     }
 

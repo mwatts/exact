@@ -126,6 +126,8 @@ fn event(e: &Event) -> String {
         Event::Land | Event::InputLand => "{\"land\":true}".into(),
         // `prepare` drives the JS target only up to a script's first answer.
         Event::Answer(..) => unreachable!("a changed answer is not a JS target event"),
+        // `prepare` drives the JS target only up to a script's first key.
+        Event::Key(..) => unreachable!("a key is not a JS target event"),
     }
 }
 
@@ -160,7 +162,7 @@ fn prepare(case: &Case, dir: &Path, index: usize) -> Result<Ready, JsVerdict> {
         ));
     }
     let plan = compile(case).map_err(JsVerdict::Refused)?;
-    let events = crate::script::before_answer(&case.events);
+    let events = crate::script::modelled(&case.events);
     let (rust, data) = observe::run(plan.clone(), Oracle::for_case(&plan, case), events);
     let data = data.expect("the oracle comes back");
     let file = match &case.path {

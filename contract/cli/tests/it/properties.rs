@@ -265,8 +265,8 @@ fn device_json_refuses_the_same_imported_cone_as_verify() {
     std::fs::write(&app, "use reading from \"./clock.contract\"\ncomponent App\n  derive outer = reading()\n  view\n    text \"clock\"\n").unwrap();
     let tests = dir.join("app.test.contract");
     std::fs::write(&tests, "always \"time\"\n  expect state outer whole\n").unwrap();
-    let properties = contract::properties(&std::fs::read_to_string(&tests).unwrap()).unwrap();
-    let errors = contract::check_properties_path(&app, &properties).unwrap_err();
+    let mut properties = contract::properties(&std::fs::read_to_string(&tests).unwrap()).unwrap();
+    let errors = contract::check_properties_path(&app, &mut properties).unwrap_err();
     assert!(errors
         .iter()
         .any(|e| e.to_string().contains("performanceNow")));

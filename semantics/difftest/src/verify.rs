@@ -83,14 +83,14 @@ pub fn run(file: &Path, options: &Options) -> Result<bool, String> {
         match contract::tests(&text)
             .and_then(|tests| contract::properties(&text).map(|p| (tests, p)))
         {
-            Ok((tests, declarations)) => {
+            Ok((tests, mut declarations)) => {
                 for test in &tests {
                     if let Err(e) = crate::script::check_answers(&plan, test) {
                         println!("SCRIPT {}:{e}", show(path));
                         ok = false;
                     }
                 }
-                if let Err(errors) = contract::check_properties_path(&file, &declarations) {
+                if let Err(errors) = contract::check_properties_path(&file, &mut declarations) {
                     for e in errors {
                         println!("PROPERTY REFUSED {}:{e}", show(path));
                     }
@@ -1062,7 +1062,12 @@ fn print_property(
                 .join("; "),
             None => step
                 .iter()
-                .filter(|l| l.starts_with("ran ") && l.split_whitespace().nth(2) == Some(&p.name))
+                .filter(|l| {
+                    l.starts_with("ran ")
+                        && l.split_whitespace()
+                            .nth(2)
+                            .is_some_and(|a| p.actions.iter().any(|x| x == a))
+                })
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("; "),

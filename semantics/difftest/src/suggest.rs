@@ -69,7 +69,7 @@ impl Suggestions {
                 })
             })
             .collect();
-        let properties: Vec<_> = names
+        let mut properties: Vec<_> = names
             .iter()
             .enumerate()
             .map(|(i, (name, _))| PropertyDecl {
@@ -83,9 +83,10 @@ impl Suggestions {
                         test: PropertyTest::Whole,
                     },
                 }],
+                actions: Vec::new(),
             })
             .collect();
-        let refused: BTreeSet<_> = contract::check_properties_path(file, &properties)
+        let refused: BTreeSet<_> = contract::check_properties_path(file, &mut properties)
             .err()
             .unwrap_or_default()
             .into_iter()

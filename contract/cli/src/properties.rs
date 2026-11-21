@@ -9,14 +9,16 @@ pub fn properties(src: &str) -> Result<Vec<PropertyDecl>, CompileError> {
     Ok(contract_syntax::parse(src)?.properties)
 }
 
-/// Check property reads against the app's expanded root before running scripts.
+/// Check property reads against the app's expanded root before running
+/// scripts, and resolve the actions they name ([`PropertyDecl::actions`]).
 pub fn check_properties_path(
     path: &Path,
-    properties: &[PropertyDecl],
+    properties: &mut [PropertyDecl],
 ) -> Result<(), Vec<CompileError>> {
     let (file, expanded) = property_program(path)?;
     let errors: Vec<_> = contract_analyze::check_properties(&expanded.root, &file.fns, properties)
         .into_iter()
+        .chain(contract_analyze::resolve_actions(&expanded, properties))
         .map(CompileError::from)
         .collect();
     if errors.is_empty() {

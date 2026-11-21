@@ -999,6 +999,13 @@ Numbers use binary64 arithmetic and IEEE comparisons; other values compare by
 their whole printed text. These checks cover observed steps, not every commit
 inside a step, and are not proofs.
 
+`after` and `never refuses` name a root action by its name. A used component's
+action is `Component.action` (`after "Palette.typed"`): it covers the action of
+every instance of that component, each of which the runner names apart
+(`typed#` and a hash). Before any script runs, verify refuses a name that is neither,
+naming what the component declares, and a bare child action's name, giving its
+qualified form. A bare name nothing declares is not exercised. The receipt reports a property by the name as written.
+
 `contract test <file>` emits an object with `tests` and `properties` arrays. Each
 property carries `kind`, `name`, its declaration `line` and parsed `lines`; each
 line has its source `line` and an `op` (`expect-state`, `only-writes`, `command`).

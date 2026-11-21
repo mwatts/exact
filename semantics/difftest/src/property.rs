@@ -120,7 +120,7 @@ pub(crate) fn evaluate(properties: &[PropertyDecl], observation: &[String]) -> R
         if p.kind == K::NeverRefuses {
             for (si, step) in steps.iter().enumerate() {
                 for (kind, name, outcome) in &step.ran {
-                    if *name != p.name {
+                    if !p.actions.iter().any(|a| a == name) {
                         continue;
                     }
                     report.counts[pi][0].checked += 1;
@@ -147,17 +147,15 @@ pub(crate) fn evaluate(properties: &[PropertyDecl], observation: &[String]) -> R
             let previous = si.checked_sub(1).map(|k| &steps[k]);
             let (old, current, commands, eligible, at) = match &p.kind {
                 K::Always => (previous, step, vec![step], step.config, si),
-                K::After(action) => {
+                K::After(_) => {
+                    let named = |a: &str| p.actions.iter().any(|x| x == a);
                     if !step.input()
-                        || !step
-                            .ran
-                            .iter()
-                            .any(|(k, a, _)| *k == "handler" && *a == action)
+                        || !step.ran.iter().any(|(k, a, _)| *k == "handler" && named(a))
                     {
                         continue;
                     }
                     let land = steps.get(si + 1).filter(|s| s.label == "land");
-                    let eligible = step.ran.as_slice() == [("handler", action.as_str(), "ok")]
+                    let eligible = matches!(step.ran.as_slice(), [("handler", a, "ok")] if named(a))
                         && !step.omitted
                         && step.config
                         && previous.is_some_and(|s| s.config)
@@ -558,5 +556,96 @@ mod tests {
             &pair(before, before, "slot queued none\nslot rec {false,[]}")
         )
         .passed());
+    }
+
+    const TWO_COUNTERS: &str = "component App
+  state last = \"\"
+  state taps = 0
+  action count(label: string)
+    last = label
+    taps = taps + 1
+  view
+    column
+      Counter(label=\"a\", tapped=count)
+      Counter(label=\"b\", tapped=count)
+
+component Counter
+  props
+    label: string
+    tapped: action
+  action bump
+    tapped(label)
+  view
+    button label press=bump testId=(label)
+";
+
+    /// Resolve `tests` against [`TWO_COUNTERS`] as `contract verify` does.
+    fn resolved(tests: &str) -> Result<Vec<contract_syntax::PropertyDecl>, Vec<String>> {
+        let dir = std::env::temp_dir().join(format!(
+            "difftest-child-actions-{}-{}",
+            std::process::id(),
+            tests.len()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = dir.join("app.contract");
+        std::fs::write(&app, TWO_COUNTERS).unwrap();
+        let mut properties = contract::properties(tests).unwrap();
+        let checked = contract::check_properties_path(&app, &mut properties);
+        let _ = std::fs::remove_dir_all(&dir);
+        checked
+            .map(|()| properties)
+            .map_err(|es| es.iter().map(|e| e.to_string()).collect())
+    }
+
+    #[test]
+    fn a_childs_action_is_named_by_its_component_in_every_instance() {
+        let properties = resolved(
+            "after \"Counter.bump\" \"a tap counts once\"\n  expect state taps == old + 1\n  only writes last taps\n\nnever refuses \"Counter.bump\"\n",
+        )
+        .unwrap();
+        let names = &properties[0].actions;
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(names.iter().all(|n| n.starts_with("bump#")), "{names:?}");
+        assert_ne!(names[0], names[1]);
+        let source = format!("{TWO_COUNTERS}\ntest \"both\"\n  tap \"a\"\n  tap \"b\"\n");
+        let s = crate::script::scripted("counters", &source, None)
+            .unwrap()
+            .remove(0);
+        let plan = crate::compile(&s.case).unwrap();
+        let oracle = crate::oracle::Oracle::for_case(&plan, &s.case);
+        let (lines, _) = crate::observe::run(plan, oracle, &s.case.events);
+        let r = evaluate(&properties, &lines);
+        assert!(r.passed(), "{:?}", r.failures);
+        assert_eq!(
+            r.counts[0].iter().map(|c| c.checked).collect::<Vec<_>>(),
+            [2, 2]
+        );
+        assert_eq!(r.counts[1][0].checked, 2);
+    }
+
+    #[test]
+    fn an_action_no_component_declares_is_refused_by_name() {
+        for (written, refusal) in [
+            (
+                "Counter.press",
+                "`Counter` has no action `press`; its actions: bump",
+            ),
+            ("Missing.bump", "the app uses no component `Missing`"),
+            (
+                "bump",
+                "`bump` is a child's action; name it by its component: `Counter.bump`",
+            ),
+        ] {
+            let errors =
+                resolved(&format!("after \"{written}\" \"p\"\n  writes none\n")).unwrap_err();
+            assert!(
+                errors.iter().any(|e| e.contains(refusal)),
+                "{written}: {errors:?}"
+            );
+        }
+        let root = resolved("after \"App.count\" \"p\"\n  writes none\n\nnever refuses \"count\"\n\nnever refuses \"nothing\"\n").unwrap();
+        assert_eq!(root[0].actions, ["count"]);
+        assert_eq!(root[1].actions, ["count"]);
+        assert_eq!(root[2].actions, ["nothing"]);
     }
 }

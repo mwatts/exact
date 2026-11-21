@@ -30,7 +30,7 @@ never refuses "reset"
 ```
 
 Choose the blocks your app means. Names read root states or derives; no fields,
-indices or expressions. A derive may read only state, pure functions and,
+indices or expressions. A child's action is `Component.action`. A derive may read only state, pure functions and,
 in `always`, resources; the rest is refused with the dependency chain. `stays true` means that a true value cannot become false at the next observed
 step. `after` checks an eligible commit and its landed continuations; extra commits
 can make a line counted only. The [grammar](../contract-grammar.md#authored-tests)

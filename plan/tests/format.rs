@@ -1104,6 +1104,28 @@ fn the_format_digest_is_pinned() {
     );
 }
 
+#[path = "../format_digest.rs"]
+mod format_digest;
+
+/// A build that turns on serde_json's `preserve_order` (Cargo unifies it
+/// across a workspace) computes the digest the stock compiler does. This
+/// test's serde_json has the feature: it prints the table in file order.
+#[test]
+fn the_format_digest_does_not_follow_serde_jsons_key_order() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tables/format.json"
+    ))
+    .unwrap();
+    let table: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_ne!(
+        serde_json::to_string(&table).unwrap(),
+        format_digest::canonical(&table),
+        "this test's serde_json keeps the file's key order"
+    );
+    assert_eq!(format_digest::digest(&table), FORMAT_DIGEST);
+}
+
 #[test]
 fn invalid_timer_wait_rows_are_refused_by_the_decoder() {
     for (wait, maximum, frame, tolerance) in [

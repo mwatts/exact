@@ -24,6 +24,11 @@ exact-num = { path = "../num" }
 arcstr = { version = "1.2", default-features = false }
 triomphe = { version = "0.1.16", default-features = false }
 
+[dev-dependencies]
+# The format tests check `FORMAT_DIGEST` with the key order this feature keeps.
+serde_json = { version = "1.0", features = ["preserve_order"] }
+sha2 = "0.10"
+
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

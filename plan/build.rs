@@ -5,8 +5,9 @@
 //! The generator fails closed: a table or codec it cannot validate is a build
 //! error. Output goes to `OUT_DIR/format.rs` and is never committed.
 
+mod format_digest;
+
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -516,23 +517,15 @@ fn validate(schema: &Schema) {
     assert!(schema.stdlib.len() <= 255, "format: stdlib exceeds u8");
 }
 
-fn digest(canonical: &str) -> u64 {
-    let mut h = Sha256::new();
-    h.update(b"EXACT.PLAN.FORMAT.SHA256.V1\0");
-    h.update(canonical.as_bytes());
-    let out = h.finalize();
-    u64::from_le_bytes(out[..8].try_into().unwrap())
-}
-
 fn main() {
     println!("cargo:rerun-if-changed={SCHEMA_PATH}");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=format_digest.rs");
     let text = std::fs::read_to_string(SCHEMA_PATH).expect("read tables/format.json");
     let value: serde_json::Value = serde_json::from_str(&text).expect("format.json parses");
     let schema: Schema = serde_json::from_value(value.clone()).expect("format.json shape");
     validate(&schema);
-    let canonical = serde_json::to_string(&value).unwrap();
-    let digest = digest(&canonical);
+    let digest = format_digest::digest(&value);
 
     let mut w = String::new();
     let _ = writeln!(

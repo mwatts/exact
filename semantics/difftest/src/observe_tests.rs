@@ -774,3 +774,54 @@ test "Escape closes the window"
     assert!(s.delivery.stopped.is_none(), "{:?}", s.delivery.stopped);
     crate::expectations(&s).unwrap();
 }
+
+/// A press or typed text runs after every change action due before it, as a
+/// host runs it (`Runner::run_held`) and as a key runs: the host applies each
+/// change action's receipt and advances again at once, so the input does not
+/// wait for later steps.
+#[test]
+fn a_press_runs_after_every_change_task_due_before_it() {
+    let source = r#"component App
+  state pressed = false
+  state note = ""
+  state a = 0
+  state b = 0
+  action markA
+    a = a + 1
+  action markB
+    b = b + 1
+  action press
+    pressed = true
+  action typed(text: string)
+    note = text
+  task watchA when not pressed key=pressed
+    change(markA)
+  task watchB when not pressed key=pressed
+    change(markB)
+  view
+    column
+      input value=note input=typed testId="note"
+      button "Go" press=press testId="go"
+
+test "typing runs behind the two change actions the boot left due"
+  type "note" "hi"
+  expect state note == "hi"
+  expect state a == 1
+  expect state b == 1
+
+test "a press runs behind the two change actions the boot left due"
+  tap "go"
+  expect state pressed == true
+  expect state a == 1
+  expect state b == 1
+"#;
+    for s in script::scripted("held", source, None).unwrap() {
+        assert!(
+            s.delivery.stopped.is_none(),
+            "{}: {:?}",
+            s.case.name,
+            s.delivery.stopped
+        );
+        crate::expectations(&s).unwrap_or_else(|e| panic!("{}: {e}", s.case.name));
+    }
+}

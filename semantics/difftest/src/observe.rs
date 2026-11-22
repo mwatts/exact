@@ -501,8 +501,38 @@ fn deliver(
         return (result.map(drop), receipts);
     }
     let now = r.now_ms();
-    let advanced = r.dispatch_at(view, event, now);
-    (advanced.error.map_or(Ok(()), Err), advanced.receipts.len())
+    let held = r.dispatch_at(view, event, now);
+    applied(r, held)
+}
+
+/// `a` and the advances a host makes after it: a change action yields for
+/// the host to apply its receipts, and the host advances again at once
+/// toward the same time, until nothing due yields. An input held behind the
+/// change actions runs in those advances (`Runner::run_held`).
+fn applied(
+    r: &mut Runner<Oracle>,
+    mut a: exact_runner::Advanced,
+) -> (Result<(), exact_runner::RunnerError>, usize) {
+    let (mut result, mut receipts) = (Ok(()), 0);
+    loop {
+        receipts += a.receipts.len();
+        if let Some(error) = a.error {
+            result = Err(error);
+        }
+        if !a.needs_apply {
+            break;
+        }
+        if receipts >= exact_runner::TIMER_FIRE_LIMIT
+            && r.timer_due_ms().is_some_and(|at| at <= r.now_ms())
+        {
+            result = Err(exact_runner::RunnerError::TimerFireLimit {
+                limit: exact_runner::TIMER_FIRE_LIMIT,
+            });
+            break;
+        }
+        a = r.advance_timed(r.now_ms());
+    }
+    (result, receipts)
 }
 
 /// Each DOM event gets its own path. A keydown handler can remove the focus
@@ -544,26 +574,9 @@ fn key(
     chord: &str,
 ) -> (Result<(), exact_runner::RunnerError>, usize) {
     // The work due fires before the keydown, so the route is the tree the
-    // key meets. A change action yields for the host to apply its receipts.
-    let (mut result, mut receipts) = (Ok(()), 0);
-    loop {
-        let a = r.advance_timed(r.now_ms());
-        receipts += a.receipts.len();
-        if let Some(error) = a.error {
-            result = Err(error);
-        }
-        if !a.needs_apply {
-            break;
-        }
-        if receipts >= exact_runner::TIMER_FIRE_LIMIT
-            && r.timer_due_ms().is_some_and(|at| at <= r.now_ms())
-        {
-            result = Err(exact_runner::RunnerError::TimerFireLimit {
-                limit: exact_runner::TIMER_FIRE_LIMIT,
-            });
-            break;
-        }
-    }
+    // key meets.
+    let due = r.advance_timed(r.now_ms());
+    let (mut result, mut receipts) = applied(r, due);
     let due_commands = r.take_commands();
     r.data().commands.extend(due_commands);
     for (release, key) in [false, true]

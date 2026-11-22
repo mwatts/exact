@@ -1112,11 +1112,8 @@ mod format_digest;
 /// test's serde_json has the feature: it prints the table in file order.
 #[test]
 fn the_format_digest_does_not_follow_serde_jsons_key_order() {
-    let text = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tables/format.json"
-    ))
-    .unwrap();
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tables/format.json"))
+        .unwrap();
     let table: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_ne!(
         serde_json::to_string(&table).unwrap(),
